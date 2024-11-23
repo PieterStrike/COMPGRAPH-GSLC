@@ -1,0 +1,78 @@
+from flask import Flask, render_template, request, send_file
+import numpy as np
+from PIL import Image
+import io
+import base64
+
+app = Flask(__name__)
+
+def convert_to_grayscale(image):
+    img_array = np.array(image)
+    
+    height, width = img_array.shape[:2]
+    
+    grayscale = np.zeros((height, width), dtype=np.uint8)
+    
+    for i in range(height):
+        for j in range(width):
+            r, g, b = img_array[i, j][:3]
+            gray_value = int(0.21 * r + 0.72 * g + 0.07 * b)
+            grayscale[i, j] = gray_value
+            
+    return Image.fromarray(grayscale)
+
+def apply_gaussian_blur(image, kernel_size=5, sigma=1.0):
+    img_array = np.array(image)
+    
+    k = kernel_size // 2
+    x, y = np.meshgrid(np.linspace(-k, k, kernel_size), np.linspace(-k, k, kernel_size))
+    normal = 1 / (2.0 * np.pi * sigma**2)
+    kernel = np.exp(-(x**2 + y**2) / (2.0 * sigma**2)) * normal
+    
+    height, width = img_array.shape[:2]
+    
+    blurred = np.zeros_like(img_array)
+    
+    for c in range(3):  # RGB channels
+        for i in range(k, height-k):
+            for j in range(k, width-k):
+                # Get region of interest
+                region = img_array[i-k:i+k+1, j-k:j+k+1, c]
+                # Apply kernel
+                blurred[i, j, c] = np.sum(region * kernel)
+                
+    return Image.fromarray(blurred.astype(np.uint8))
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/convert', methods=['POST'])
+def convert():
+    if 'image' not in request.files:
+        return 'No image uploaded', 400
+        
+    image = request.files['image']
+    conversion_type = request.form['type']
+    
+    img = Image.open(image)
+    
+    if conversion_type == 'grayscale':
+        processed_img = convert_to_grayscale(img)
+    else:  # blur
+        processed_img = apply_gaussian_blur(img)
+
+    buffered = io.BytesIO()
+    img.save(buffered, format="PNG")
+    original_img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    buffered = io.BytesIO()
+    processed_img.save(buffered, format="PNG")
+    processed_img_str = base64.b64encode(buffered.getvalue()).decode()
+    
+    return render_template('result.html', 
+                         original_image=original_img_str,
+                         processed_image=processed_img_str)
+
+if __name__ == '__main__':
+    app.run(debug=True)
